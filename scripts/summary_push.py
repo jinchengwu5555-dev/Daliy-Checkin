@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 """
 汇总推送脚本 - GitHub Actions 版
-从各 job 上传的 artifact 文件中读取输出，提炼关键信息，推送 Server酱
-输出格式参考原 daily_summary.py 的 extract_summary() 逻辑
 """
 
 import os
@@ -13,7 +11,6 @@ from datetime import datetime, timezone, timedelta
 
 CST = timezone(timedelta(hours=8))
 
-# (job key, 显示标签, artifact 子目录名)
 TASKS = [
     ("baidu",     "☁️ 百度网盘",  "output-baidu"),
     ("tianyiyun", "☁️ 天翼云盘",  "output-tianyiyun"),
@@ -34,14 +31,10 @@ RESULT_ICON = {
     "cancelled": "🚫",
 }
 
-# artifact 下载后的根目录
 ARTIFACT_ROOT = "/tmp/job_outputs"
 
 
-# ── 输出清洗 ────────────────────────────────────────────────
-
-def clean_output(output: str) -> list[str]:
-    """去掉空行和青龙/tee 产生的噪音行"""
+def clean_output(output):
     skip_patterns = [
         r"^##\s*(开始执行|执行结束)",
         r"^tee:",
@@ -55,14 +48,23 @@ def clean_output(output: str) -> list[str]:
     return lines
 
 
-# ── 各任务关键信息提炼 ──────────────────────────────────────
+def normalize_signin_msg(line):
+    """把 API 返回的英文错误码统一转为中文"""
+    line = re.sub(r'repeat\s*signin', '今日已签到', line, flags=re.IGNORECASE)
+    line = re.sub(r'already\s*signed', '今日已签到', line, flags=re.IGNORECASE)
+    return line
 
-def extract_summary(label: str, output: str) -> list[str]:
+
+def extract_summary(label, output):
     lines = clean_output(output)
 
     if "百度网盘" in label:
         keys = ["👤 账号:", "🏆 等级:", "💎 会员:", "📝 签到:", "🤔 答题:"]
-        return [l for l in lines if any(k in l for k in keys)]
+        result = []
+        for l in lines:
+            if any(k in l for k in keys):
+                result.append(normalize_signin_msg(l))
+        return result
 
     if "天翼云盘" in label:
         keys = ["账号信息", "签到状态", "签到成功", "已签到", "登录失败"]
@@ -78,8 +80,9 @@ def extract_summary(label: str, output: str) -> list[str]:
         result = []
         for l in lines:
             if any(k in l for k in keys):
-                # 去掉行首时间戳 "2025-06-01 09:10:00 "
+                # 去掉行首时间戳和账号前缀
                 cleaned = re.sub(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\s*', '', l)
+                cleaned = re.sub(r'^\[账号\d+\]\s*', '', cleaned)
                 result.append(cleaned)
         return result
 
@@ -92,18 +95,19 @@ def extract_summary(label: str, output: str) -> list[str]:
         return [l for l in lines if any(k in l for k in keys)]
 
     if "京东" in label:
-        keys = ["签到", "积分", "京豆", "连续", "失败", "已签到"]
+        keys = ["签到", "积分", "京豆", "连续", "失败", "已签到", "Cookie"]
         return [l for l in lines if any(k in l for k in keys)]
 
     if "NBA" in label:
-        skip = ["ESPN让分数据获取成功", "[信息]", "[警告]"]
+        skip = ["ESPN让分数据获取成功", "[信息]", "[警告]", "[错误]"]
         return [l for l in lines if l.strip() and not any(k in l for k in skip)]
 
     if "ETF" in label:
-        return [l for l in lines if l.strip()]
+        # 去掉表格分隔行，保留标题行和数据行
+        return [l for l in lines if l.strip() and not re.match(r'^\|[-: |]+\|$', l)]
 
     if "汇率" in label:
-        # 去掉 markdown 表格分隔行 "|:---|:---:|"
+        # 去掉表格分隔行，其余保留完整换行（Server酱支持 markdown 表格）
         return [l for l in lines if l.strip() and not re.match(r'^\|[-: |]+\|$', l)]
 
     if "60s" in label:
@@ -112,26 +116,17 @@ def extract_summary(label: str, output: str) -> list[str]:
     return [l for l in lines if l.strip()]
 
 
-# ── 读取 artifact 文件 ──────────────────────────────────────
-
-def read_artifact(artifact_dir: str, filename: str) -> str:
-    """
-    actions/download-artifact@v4 with merge-multiple:false
-    会把每个 artifact 解压到 <path>/<artifact-name>/<文件名>
-    """
+def read_artifact(artifact_dir, filename):
     path = os.path.join(ARTIFACT_ROOT, artifact_dir, filename)
     if os.path.exists(path):
         with open(path, encoding="utf-8", errors="replace") as f:
             return f.read()
-    # 兼容：有时文件直接在 artifact_dir 目录下（无子文件夹层）
     alt = os.path.join(ARTIFACT_ROOT, filename)
     if os.path.exists(alt):
         with open(alt, encoding="utf-8", errors="replace") as f:
             return f.read()
     return ""
 
-
-# ── 主逻辑 ──────────────────────────────────────────────────
 
 def main():
     now = datetime.now(CST).strftime("%Y-%m-%d %H:%M")
@@ -147,7 +142,6 @@ def main():
         if job_result == "success":
             success_count += 1
 
-        # 文件名与 job key 保持一致
         raw_output = read_artifact(artifact_dir, f"{key}.txt")
 
         if raw_output.strip():
@@ -158,7 +152,6 @@ def main():
 
         sections.append(f"### {label}\n\n{content}")
 
-    # 组合完整报告
     header = (
         f"# 📋 每日任务汇总  {now}\n\n"
         f"**共 {total} 个任务　✅ 成功 {success_count}　❌ 失败 {total - success_count}**"
@@ -169,7 +162,6 @@ def main():
     desp = header + "\n\n---\n\n" + "\n\n---\n\n".join(sections)
     print(desp)
 
-    # 推送 Server酱
     sc_key = os.environ.get("SERVERCHAN_KEY", "").strip()
     if not sc_key:
         print("\n⚠️ 未设置 SERVERCHAN_KEY，跳过推送")
