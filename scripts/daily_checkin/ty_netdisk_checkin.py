@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 天翼云盘签到 - GitHub Actions 版
-使用已知可用的天翼云盘签到接口
+使用真实抓包的 UA 和 Referer
 Secrets: TY_USERNAME / TY_PASSWORD
 """
 
@@ -19,18 +19,27 @@ from datetime import datetime
 BI_RM  = list("0123456789abcdefghijklmnopqrstuvwxyz")
 B64MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
+# 从抓包拿到的真实 UA 和页面地址
+ECLOUD_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_7 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 "
+    "Ecloud/11.0.2 iOS/26.3 clientId/02B2318892-4E8D-4705-"
+    "A2DB-1D674BD6DE99 clientModel/iPhone proVersion/1.0.5"
+)
+GROW_GUIDE_URL = "https://m.cloud.189.cn/zt/2024/grow-guide/index.html"
+
 
 class TianYiYunPan:
     def __init__(self, username, password, index):
-        self.username   = username
-        self.password   = password
-        self.index      = index
-        self.access_token = ""
-        self.session    = requests.Session()
+        self.username = username
+        self.password = password
+        self.index    = index
+        self.session  = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Linux; Android 11; Redmi Note 8) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/91.0.4472.120 Mobile Safari/537.36",
+            "User-Agent":   ECLOUD_UA,
+            "Referer":      GROW_GUIDE_URL,
+            "Accept":       "application/json, text/plain, */*",
+            "Accept-Language": "zh-CN,zh;q=0.9",
         })
 
     def _int2char(self, a): return BI_RM[a]
@@ -52,23 +61,21 @@ class TianYiYunPan:
         pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(pem.encode())
         return self._b64tohex(base64.b64encode(rsa.encrypt(str(string).encode(), pubkey)).decode())
 
-    # ── 登录，同时尝试获取 access_token ──────────────────────
-
     def login(self):
         try:
             print(f"👤 账号{self.index}: 登录 {self._mask(self.username)}")
-            login_ua = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/76.0"}
 
-            r    = self.session.get(
+            # redirectURL 改为新版 grow-guide 页面
+            r = self.session.get(
                 "https://m.cloud.189.cn/udb/udb_login.jsp"
                 "?pageId=1&pageKey=default&clientType=wap"
-                "&redirectURL=https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
-                headers=login_ua, timeout=15
+                f"&redirectURL={GROW_GUIDE_URL}",
+                timeout=15
             )
             url  = re.search(r"https?://[^\s'\"]+", r.text).group()
-            r    = self.session.get(url, headers=login_ua, timeout=15)
+            r    = self.session.get(url, timeout=15)
             href = re.search(r'<a id="j-tab-login-link"[^>]*href="([^"]+)"', r.text).group(1)
-            r    = self.session.get(href, headers=login_ua, timeout=15)
+            r    = self.session.get(href, timeout=15)
 
             captchaToken = re.findall(r"captchaToken' value='(.+?)'", r.text)[0]
             lt           = re.findall(r'lt = "(.+?)"', r.text)[0]
@@ -76,174 +83,102 @@ class TianYiYunPan:
             paramId      = re.findall(r'paramId = "(.+?)"', r.text)[0]
             j_rsakey     = re.findall(r'j_rsaKey" value="(\S+)"', r.text, re.M)[0]
 
+            self.session.headers.update({"lt": lt})
+
             data = {
-                "appKey": "cloud", "accountType": "01",
+                "appKey":       "cloud",
+                "accountType":  "01",
                 "userName":     f"{{RSA}}{self._rsa_encode(j_rsakey, self.username)}",
                 "password":     f"{{RSA}}{self._rsa_encode(j_rsakey, self.password)}",
-                "validateCode": "", "captchaToken": captchaToken,
-                "returnUrl": returnUrl, "mailSuffix": "@189.cn", "paramId": paramId,
+                "validateCode": "",
+                "captchaToken": captchaToken,
+                "returnUrl":    returnUrl,
+                "mailSuffix":   "@189.cn",
+                "paramId":      paramId,
             }
             r = self.session.post(
                 "https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do",
-                data=data, headers={**login_ua, "Referer": "https://open.e.189.cn/"}, timeout=15
+                data=data,
+                headers={"Referer": "https://open.e.189.cn/"},
+                timeout=15
             )
             result = r.json()
             if result.get("result") != 0:
                 print(f"❌ 登录失败 - {result.get('msg', '未知')}")
                 return False
 
-            # 跟随跳转
-            redirect = self.session.get(result["toUrl"], timeout=15, allow_redirects=True)
+            # 跟随跳转，让 Cookie 写入
+            self.session.get(result["toUrl"], timeout=15, allow_redirects=True)
 
-            # 尝试从重定向 URL 或响应里取 accessToken
-            for pat in [r'accessToken=([^&"\']+)', r'"accessToken"\s*:\s*"([^"]+)"',
-                        r'access_token=([^&"\']+)']:
-                m = re.search(pat, redirect.url + redirect.text)
-                if m:
-                    self.access_token = m.group(1)
-                    print(f"  accessToken 长度: {len(self.access_token)}")
-                    break
-
-            # 也从 cookie 里找
-            for c in self.session.cookies:
-                if 'token' in c.name.lower() or c.name == 'COOKIE_LOGIN_USER':
-                    print(f"  Cookie: {c.name}={c.value[:20]}...")
-
+            # 打印 Cookie 确认
+            cookie_names = [c.name for c in self.session.cookies]
+            print(f"  Cookie: {cookie_names}")
             print(f"✅ 账号{self.index}: 登录成功")
             return True
+
         except Exception as e:
             print(f"❌ 登录异常 - {e}")
             return False
 
-    # ── 签到：依次尝试所有已知可用接口 ───────────────────────
-
     def sign_in(self):
-        rand      = str(round(time.time() * 1000))
-        sign_date = datetime.now().strftime("%Y-%m-%d")
+        rand = str(round(time.time() * 1000))
 
-        # 按优先级排列的签到接口列表
-        attempts = [
+        # 先验证 Session 是否有效（getUserBriefInfo 从抓包里看到能通）
+        try:
+            r = self.session.get(
+                "https://m.cloud.189.cn/v2/getUserBriefInfo.action",
+                timeout=10
+            )
+            info = r.json()
+            print(f"  用户信息: {json.dumps(info, ensure_ascii=False)[:100]}")
+        except Exception as e:
+            print(f"  ⚠️ 获取用户信息失败: {e}")
 
-            # ① 天翼云盘 2023+ 新版签到接口（家庭云任务）
-            {
-                "desc": "新版家庭云签到",
-                "method": "GET",
-                "url": "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action",
-                "params": {"taskId": "SIGN_IN", "activityId": ""},
-                "data": None,
-                "headers": {"Referer": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
-                            "Accept": "application/json, text/plain, */*",
-                            "X-Requested-With": "XMLHttpRequest"},
-            },
+        # 签到接口候选（新版 grow-guide 页面用的接口，待确认具体路径）
+        sign_attempts = [
+            # 新版 grow-guide 下的签到接口
+            ("GET",  "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action",
+             {"taskId": "SIGN_IN"}, None),
 
-            # ② 同接口换 activityId
-            {
-                "desc": "新版家庭云签到(activityId=1)",
-                "method": "POST",
-                "url": "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action",
-                "params": None,
-                "data": {"taskId": "SIGN_IN", "activityId": "1", "rand": rand},
-                "headers": {"Referer": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
-                            "Content-Type": "application/x-www-form-urlencoded",
-                            "X-Requested-With": "XMLHttpRequest"},
-            },
+            ("GET",  "https://m.cloud.189.cn/zt/2024/grow-guide/api/sign",
+             None, None),
 
-            # ③ 个人云签到 (cloud.189.cn)
-            {
-                "desc": "个人云签到",
-                "method": "GET",
-                "url": "https://cloud.189.cn/api/mkt/userSign.action",
-                "params": {"rand": rand, "clientType": "TELEANDROID", "version": "8.6.3"},
-                "data": None,
-                "headers": {"Referer": "https://cloud.189.cn/web/main",
-                            "Accept": "application/json"},
-            },
+            ("POST", "https://m.cloud.189.cn/zt/2024/grow-guide/api/sign",
+             None, {"rand": rand}),
 
-            # ④ 旧版 wap 签到
-            {
-                "desc": "旧版wap签到",
-                "method": "GET",
-                "url": f"https://api.cloud.189.cn/mkt/userSign.action",
-                "params": {"rand": rand, "clientType": "TELEANDROID",
-                           "version": "8.6.3", "model": "SM-G930K"},
-                "data": None,
-                "headers": {
-                    "User-Agent": "Mozilla/5.0 (Linux; Android 5.1.1; SM-G930K Build/NRD90M; wv) "
-                                  "AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 "
-                                  "Chrome/74.0.3729.136 Mobile Safari/537.36 "
-                                  "Ecloud/8.6.3 Android/22 clientId/355325117317828 "
-                                  "clientModel/SM-G930K imsi/460071114317824 "
-                                  "clientChannelId/qq proVersion/1.0.6",
-                    "Referer": "https://m.cloud.189.cn/zhuanti/2016/sign/index.jsp?albumBackupOpened=1",
-                },
-            },
+            # grow-guide 对应的后端接口（猜测路径）
+            ("GET",  "https://m.cloud.189.cn/v2/growGuideSign.action",
+             {"rand": rand}, None),
 
-            # ⑤ 天翼云盘 APP 接口（需要 Authorization header）
-            {
-                "desc": "APP接口(Bearer Token)",
-                "method": "GET",
-                "url": "https://cloud.189.cn/api/portal/v2/getUserSignInfo.action",
-                "params": None,
-                "data": None,
-                "headers": {
-                    "Authorization": f"Bearer {self.access_token}" if self.access_token else "",
-                    "Accept": "application/json",
-                },
-            },
+            ("POST", "https://m.cloud.189.cn/v2/growGuideSign.action",
+             None, {"rand": rand}),
+
+            ("GET",  "https://m.cloud.189.cn/v2/userSign.action",
+             {"rand": rand}, None),
+
+            # 2024 新版签到
+            ("GET",  "https://m.cloud.189.cn/zt/2024/sign/index.html",
+             None, None),
         ]
 
-        for attempt in attempts:
-            desc = attempt["desc"]
+        print(f"\n  --- 签到接口探测 ---")
+        for method, url, params, data in sign_attempts:
             try:
-                h = {**self.session.headers, **attempt.get("headers", {})}
-                # 过滤空 header
-                h = {k: v for k, v in h.items() if v}
-
-                if attempt["method"] == "GET":
-                    r = self.session.get(attempt["url"], params=attempt["params"],
-                                         headers=h, timeout=12)
+                if method == "GET":
+                    r = self.session.get(url, params=params, timeout=10)
                 else:
-                    r = self.session.post(attempt["url"], data=attempt["data"],
-                                          params=attempt["params"],
-                                          headers=h, timeout=12)
-
-                body = r.text[:200]
-                print(f"\n  [{desc}] {r.status_code}")
-                print(f"  响应: {body[:150]}")
-
-                # 判断成功
-                try:
-                    j = r.json()
-                except Exception:
-                    j = {}
-
-                # 成功标志
-                if j.get("result") == "ok" or j.get("prizeName") or j.get("netdiskBonus") is not None:
-                    bonus   = j.get("netdiskBonus", 0)
-                    prize   = j.get("prizeName", "")
-                    is_sign = str(j.get("isSign", "false")).lower() == "true"
-                    reward  = prize or f"{bonus}M空间"
-                    if is_sign and bonus == 0 and not prize:
-                        print(f"📅 账号{self.index}: 今日已签到")
-                    else:
-                        print(f"✅ 账号{self.index}: 签到成功，获得 {reward}")
-                    return True
-
-                # 已签到
-                if any(k in str(j) for k in ["已签到", "isSign", "today"]) and \
-                   any(k in str(j) for k in ["true", "已"]):
-                    print(f"📅 账号{self.index}: 今日已签到")
-                    return True
-
-                # 失败，继续下一个
-                err = j.get("errorMsg") or j.get("message") or j.get("msg") or "未知"
-                print(f"  → 失败: {err}，尝试下一个接口")
-
+                    r = self.session.post(url, data=data, params=params,
+                                          headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                          timeout=10)
+                body = r.text[:150].replace('\n', ' ')
+                ok = "★" if r.status_code == 200 and len(r.text) > 30 and (
+                    'sign' in r.text.lower() or 'prize' in r.text.lower() or
+                    'bonus' in r.text.lower() or 'result' in r.text.lower()
+                ) else " "
+                print(f"{ok}[{r.status_code}] {url.split('/')[-1][:40]} → {body[:100]}")
             except Exception as e:
-                print(f"  [{desc}] 异常: {e}")
-
-        print(f"\n❌ 账号{self.index}: 所有接口均失败")
-        return False
+                print(f"  ERR {url.split('/')[-1][:30]}: {e}")
+            time.sleep(0.3)
 
     @staticmethod
     def _mask(s):
@@ -267,11 +202,10 @@ def main():
         raise SystemExit(1)
     usernames = [u.strip() for u in ty_username_env.split('\n') if u.strip()]
     passwords = [p.strip() for p in ty_password_env.split('\n') if p.strip()]
-    if len(usernames) != len(passwords):
-        print("❌ 用户名和密码数量不匹配"); raise SystemExit(1)
     print(f"📝 共 {len(usernames)} 个账号")
     for i, (u, p) in enumerate(zip(usernames, passwords)):
-        if i > 0: time.sleep(random.uniform(5, 10))
+        if i > 0:
+            time.sleep(random.uniform(5, 10))
         TianYiYunPan(u, p, i + 1).run()
     print(f"\n==== 完成 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====")
 
