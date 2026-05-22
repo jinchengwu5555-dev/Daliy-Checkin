@@ -150,10 +150,7 @@ def main():
         print(line)
     print(f"... 共 {total} 条")
 
-    # 推送已暂时关闭（Server酱免费版每日限5次）
-    # title = f"📰 每日资讯 {datetime.now(CST).strftime('%Y-%m-%d')}"
-    # push_serverchan(title, digest)
-    print("\n(推送已关闭，完整内容如下:)")
+    # 直接打印完整内容（由 summary_push.py 统一推送）
     print(digest)
     print("==== 完成 ====")
 
