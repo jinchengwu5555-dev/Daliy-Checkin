@@ -209,6 +209,30 @@ jobs:
           retention-days: 1
 
   # ──────────────────────────────────────────────
+  # 9. RSS 资讯摘要
+  # ──────────────────────────────────────────────
+  rss:
+    name: 📰 RSS 资讯
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 抓取 RSS
+        run: |
+          mkdir -p /tmp/job_outputs
+          python scripts/daily_checkin/rss_digest.py 2>&1 | tee /tmp/job_outputs/rss.txt
+      - name: 上传输出
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: output-rss
+          path: /tmp/job_outputs/rss.txt
+          retention-days: 1
+
+  # ──────────────────────────────────────────────
   # 汇总推送
   # ──────────────────────────────────────────────
   summary:
@@ -223,6 +247,7 @@ jobs:
       - etf
       - exchange
       - news
+      - rss
     if: always()
     steps:
       - uses: actions/checkout@v4
@@ -247,5 +272,6 @@ jobs:
           RESULT_ETF:      ${{ needs.etf.result }}
           RESULT_EXCHANGE: ${{ needs.exchange.result }}
           RESULT_NEWS:     ${{ needs.news.result }}
+          RESULT_RSS:      ${{ needs.rss.result }}
           GITHUB_RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python scripts/summary_push.py
