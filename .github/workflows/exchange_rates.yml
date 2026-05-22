@@ -16,10 +16,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install requests -q
-      - name: 获取汇率
-        run: python scripts/daily_checkin/exchange_rates.py
-      - name: 推送 Server酱
-        if: ${{ secrets.SERVERCHAN_KEY != '' }}
+      - name: 获取汇率并推送
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: |
@@ -30,11 +27,13 @@ jobs:
               capture_output=True, text=True
           )
           output = result.stdout.strip()
-          key = os.environ.get('SERVERCHAN_KEY', '')
+          print(output)
+          key = os.environ.get('SERVERCHAN_KEY', '').strip()
           if key and output:
-              requests.post(
+              r = requests.post(
                   f'https://sctapi.ftqq.com/{key}.send',
                   data={'title': '💱 今日汇率', 'desp': output},
                   timeout=10
               )
+              print('Server酱推送:', r.json())
           EOF
