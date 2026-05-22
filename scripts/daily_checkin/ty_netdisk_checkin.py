@@ -1,13 +1,12 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
 """
-天翼云盘签到 - GitHub Actions 版（接口参数穷举版）
+天翼云盘签到 - 抓取 shakeLottery SPA 的 API 接口
 """
 
 import time
 import re
 import base64
-import random
 import requests
 import rsa
 import os
@@ -16,7 +15,6 @@ from datetime import datetime
 
 BI_RM  = list("0123456789abcdefghijklmnopqrstuvwxyz")
 B64MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
 
 class TianYiYunPan:
     def __init__(self, username, password, index):
@@ -92,100 +90,63 @@ class TianYiYunPan:
             print(f"❌ 登录异常 - {e}")
             return False
 
-    def probe_draw_prize(self):
-        """对 drawPrizeMarketDetails.action 穷举不同参数组合"""
-        url  = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action"
-        rand = str(round(time.time() * 1000))
+    def find_apis_from_spa(self):
+        base = "https://m.cloud.189.cn/zhuanti/2021/shakeLottery"
 
-        # 不同的 taskId 候选值
-        task_ids = [
-            "SIGN_IN",
-            "sign_in",
-            "SignIn",
-            "daily_sign",
-            "DAILY_SIGN",
-            "SIGNIN",
-            "1",
-            "sign",
-        ]
+        # 1. 拉取 index.html，找 JS 文件列表
+        print("\n=== 解析 SPA JS 文件 ===")
+        r = self.session.get(f"{base}/index.html", timeout=15)
+        html = r.text
 
-        # 不同请求头组合
-        header_variants = [
-            # wap UA
-            {"User-Agent": "Mozilla/5.0 (Linux; Android 11; Redmi Note 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36",
-             "Referer": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html"},
-            # 默认 UA（已有）
-            {},
-        ]
+        # 找所有 <script src="..."> 和 JS 文件引用
+        js_files = re.findall(r'src=["\']([^"\']*\.js[^"\']*)["\']', html)
+        print(f"发现 JS 文件: {js_files}")
 
-        print("\n==== drawPrizeMarketDetails 参数穷举 ====")
-
-        # 1. 先试不同 taskId（GET）
-        print("\n--- GET taskId 穷举 ---")
-        for tid in task_ids:
+        # 2. 逐个拉取 JS，搜索 API 路径
+        api_candidates = set()
+        for js in js_files:
+            if not js.startswith('http'):
+                js_url = f"{base}/{js.lstrip('/')}"
+            else:
+                js_url = js
             try:
-                r = self.session.get(url, params={"taskId": tid}, timeout=8)
-                body = r.text[:120].replace('\n', ' ')
-                marker = "★" if '"result":"ok"' in r.text or '"prizeName"' in r.text else " "
-                print(f"{marker}[{r.status_code}] taskId={tid} → {body}")
-            except Exception as e:
-                print(f"  ERR taskId={tid}: {e}")
-            time.sleep(0.3)
+                rj = self.session.get(js_url, timeout=15)
+                content = rj.text
 
-        # 2. 再试不同 taskId（POST）
-        print("\n--- POST taskId 穷举 ---")
-        for tid in task_ids[:4]:  # 只试前4个避免太慢
+                # 提取所有像 API 路径的字符串
+                # 匹配 /v2/xxx.action 或 /api/xxx 或 action 相关
+                paths = re.findall(r'["\'](/[a-zA-Z0-9/_\-\.]*(?:action|sign|task|prize|lottery)[a-zA-Z0-9/_\-\.]*)["\']', content)
+                for p in paths:
+                    api_candidates.add(p)
+
+                # 也找完整 URL
+                full_urls = re.findall(r'https?://[a-zA-Z0-9\-\.]+\.cloud\.189\.cn[/a-zA-Z0-9/_\-\.?=&]*', content)
+                for u in full_urls:
+                    if any(k in u for k in ['sign', 'action', 'task', 'prize', 'lottery']):
+                        api_candidates.add(u)
+
+                print(f"  {js_url.split('/')[-1]}: {len(content)} bytes, 找到 {len(paths)} 个路径")
+            except Exception as e:
+                print(f"  ERR {js_url}: {e}")
+
+        print(f"\n=== 提取到的 API 候选路径 ({len(api_candidates)}个) ===")
+        for p in sorted(api_candidates):
+            print(f"  {p}")
+
+        # 3. 逐一请求这些接口
+        print(f"\n=== 逐一探测候选接口 ===")
+        for path in sorted(api_candidates):
+            if path.startswith('/'):
+                url = f"https://m.cloud.189.cn{path}"
+            else:
+                url = path
             try:
-                r = self.session.post(url,
-                    data={"taskId": tid, "rand": rand},
-                    headers={"Content-Type": "application/x-www-form-urlencoded",
-                             "Referer": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html"},
-                    timeout=8)
-                body = r.text[:120].replace('\n', ' ')
-                marker = "★" if '"result":"ok"' in r.text or '"prizeName"' in r.text else " "
-                print(f"{marker}[{r.status_code}] POST taskId={tid} → {body}")
+                r = self.session.get(url, timeout=8)
+                body = r.text[:100].replace('\n', ' ')
+                marker = "★" if r.status_code == 200 and '{' in r.text else " "
+                print(f"{marker}[{r.status_code}] {path.split('/')[-1][:40]} → {body[:80]}")
             except Exception as e:
-                print(f"  ERR POST taskId={tid}: {e}")
-            time.sleep(0.3)
-
-        # 3. 试 GET 带不同额外参数
-        print("\n--- GET 额外参数穷举 ---")
-        extra_params = [
-            {"taskId": "SIGN_IN", "clientType": "wap"},
-            {"taskId": "SIGN_IN", "clientType": "TELEANDROID"},
-            {"taskId": "SIGN_IN", "rand": rand},
-            {"taskId": "SIGN_IN", "type": "1"},
-            {"taskId": "SIGN_IN", "actionType": "sign"},
-        ]
-        for params in extra_params:
-            try:
-                r = self.session.get(url, params=params, timeout=8)
-                body = r.text[:120].replace('\n', ' ')
-                marker = "★" if '"result":"ok"' in r.text or '"prizeName"' in r.text else " "
-                print(f"{marker}[{r.status_code}] {params} → {body}")
-            except Exception as e:
-                print(f"  ERR {params}: {e}")
-            time.sleep(0.3)
-
-        # 4. 试 shakeLottery 相关接口（登录重定向就到这个页面）
-        print("\n--- shakeLottery 相关接口 ---")
-        shake_urls = [
-            "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
-            "https://m.cloud.189.cn/v2/shakeLottery.action",
-            "https://m.cloud.189.cn/v2/getUserSignInfo.action",
-            "https://m.cloud.189.cn/v2/userSign.action",
-            "https://m.cloud.189.cn/v2/doSignIn.action",
-        ]
-        for su in shake_urls:
-            try:
-                r = self.session.get(su, timeout=8)
-                body = r.text[:150].replace('\n', ' ')
-                print(f"[{r.status_code}] {su.split('/')[-1]} → {body}")
-            except Exception as e:
-                print(f"  ERR {su.split('/')[-1]}: {e}")
-            time.sleep(0.3)
-
-        print("==== 穷举结束 ====")
+                print(f"  ERR {path}: {e}")
 
     @staticmethod
     def _mask(s):
@@ -196,8 +157,7 @@ class TianYiYunPan:
         print(f"\n==== 天翼云盘 账号{self.index} ====")
         if not self.login():
             return
-        self.probe_draw_prize()
-
+        self.find_apis_from_spa()
 
 def main():
     print(f"==== 天翼云盘签到 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====")
