@@ -1,0 +1,213 @@
+name: 📋 每日任务汇总
+
+on:
+  schedule:
+    # 北京时间 09:10（UTC+8），即 UTC 01:10
+    - cron: '10 1 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+jobs:
+  # ──────────────────────────────────────────────
+  # 1. 百度网盘签到
+  # ──────────────────────────────────────────────
+  baidu:
+    name: ☁️ 百度网盘签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 执行签到
+        env:
+          BAIDU_COOKIE: ${{ secrets.BAIDU_COOKIE }}
+          PRIVACY_MODE: 'true'
+        run: python scripts/daily_checkin/baiduwangpan_checkin.py
+
+  # ──────────────────────────────────────────────
+  # 2. 天翼云盘签到
+  # ──────────────────────────────────────────────
+  tianyiyun:
+    name: ☁️ 天翼云盘签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests rsa -q
+      - name: 执行签到
+        env:
+          TY_USERNAME: ${{ secrets.TY_USERNAME }}
+          TY_PASSWORD: ${{ secrets.TY_PASSWORD }}
+        run: python scripts/daily_checkin/ty_netdisk_checkin.py
+
+  # ──────────────────────────────────────────────
+  # 3. 夸克网盘签到
+  # ──────────────────────────────────────────────
+  quark:
+    name: 🟠 夸克网盘签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 执行签到
+        env:
+          QUARK_COOKIE: ${{ secrets.QUARK_COOKIE }}
+        run: python scripts/daily_checkin/quark_sign.py
+
+  # ──────────────────────────────────────────────
+  # 4. Bilibili 签到
+  # ──────────────────────────────────────────────
+  bilibili:
+    name: 📺 Bilibili 签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 执行签到
+        env:
+          BILIBILI_COOKIE: ${{ secrets.BILIBILI_COOKIE }}
+        run: python scripts/daily_checkin/bilibili_checkin.py
+
+  # ──────────────────────────────────────────────
+  # 5. 掘金签到
+  # ──────────────────────────────────────────────
+  juejin:
+    name: 🪙 掘金签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install axios -g --prefix ./node_modules 2>/dev/null; npm install axios
+      - name: 执行签到
+        env:
+          JUEJIN_COOKIES: ${{ secrets.JUEJIN_COOKIES }}
+        run: node scripts/daily_checkin/juejin_checkin.js
+
+  # ──────────────────────────────────────────────
+  # 6. 京东签到
+  # ──────────────────────────────────────────────
+  jd:
+    name: 🛒 京东签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install axios
+      - name: 执行签到
+        env:
+          JD_COOKIE: ${{ secrets.JD_COOKIE }}
+        run: node scripts/daily_checkin/jd_sign.js
+
+  # ──────────────────────────────────────────────
+  # 7. NBA 赛程
+  # ──────────────────────────────────────────────
+  nba:
+    name: 🏀 NBA 赛程
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests urllib3 -q
+      - name: 获取赛程
+        run: python scripts/daily_checkin/nba_schedule.py
+
+  # ──────────────────────────────────────────────
+  # 8. ETF 行情
+  # ──────────────────────────────────────────────
+  etf:
+    name: 📊 ETF 行情
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests yfinance -q
+      - name: 获取行情
+        run: python scripts/daily_checkin/etf_stock.py
+
+  # ──────────────────────────────────────────────
+  # 9. 今日汇率
+  # ──────────────────────────────────────────────
+  exchange:
+    name: 💱 今日汇率
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 获取汇率
+        run: python scripts/daily_checkin/exchange_rates.py
+
+  # ──────────────────────────────────────────────
+  # 10. 每日 60s 新闻
+  # ──────────────────────────────────────────────
+  news:
+    name: 📰 每日 60s
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 获取新闻
+        run: python scripts/daily_checkin/news_60s.py
+
+  # ──────────────────────────────────────────────
+  # 汇总：所有 job 完成后推送 Server酱
+  # ──────────────────────────────────────────────
+  summary:
+    name: 📋 汇总推送
+    runs-on: ubuntu-latest
+    needs:
+      - baidu
+      - tianyiyun
+      - quark
+      - bilibili
+      - juejin
+      - jd
+      - nba
+      - etf
+      - exchange
+      - news
+    if: always()   # 即使部分 job 失败也执行汇总
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 生成并推送汇总
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+          # 各 job 的结果状态（success / failure / skipped）
+          RESULT_BAIDU:    ${{ needs.baidu.result }}
+          RESULT_TIANYIYUN: ${{ needs.tianyiyun.result }}
+          RESULT_QUARK:    ${{ needs.quark.result }}
+          RESULT_BILIBILI: ${{ needs.bilibili.result }}
+          RESULT_JUEJIN:   ${{ needs.juejin.result }}
+          RESULT_JD:       ${{ needs.jd.result }}
+          RESULT_NBA:      ${{ needs.nba.result }}
+          RESULT_ETF:      ${{ needs.etf.result }}
+          RESULT_EXCHANGE: ${{ needs.exchange.result }}
+          RESULT_NEWS:     ${{ needs.news.result }}
+          GITHUB_RUN_URL:  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python scripts/summary_push.py
