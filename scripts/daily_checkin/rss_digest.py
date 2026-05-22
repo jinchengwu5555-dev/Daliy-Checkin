@@ -25,7 +25,7 @@ FEEDS = [
     # 🇺🇸 美国
     ("us",       "🇺🇸 美国",         "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml", 3),
     # 🇲🇾 马来西亚
-    ("my_star",  "🇲🇾 马来 (Star)",  "https://www.thestar.com.my/rss/news",                       3),
+    ("my_mm",    "🇲🇾 马来 (Malay Mail)", "https://www.malaymail.com/feed",                       3),
     ("my_fmt",   "🇲🇾 马来 (FMT)",   "https://www.freemalaysiatoday.com/category/nation/feed/",   3),
     # 💰 财经
     ("biz",      "💰 财经",          "https://feeds.bbci.co.uk/news/business/rss.xml",             4),
@@ -150,8 +150,11 @@ def main():
         print(line)
     print(f"... 共 {total} 条")
 
-    title = f"📰 每日资讯 {datetime.now(CST).strftime('%Y-%m-%d')}"
-    push_serverchan(title, digest)
+    # 推送已暂时关闭（Server酱免费版每日限5次）
+    # title = f"📰 每日资讯 {datetime.now(CST).strftime('%Y-%m-%d')}"
+    # push_serverchan(title, digest)
+    print("\n(推送已关闭，完整内容如下:)")
+    print(digest)
     print("==== 完成 ====")
 
 
