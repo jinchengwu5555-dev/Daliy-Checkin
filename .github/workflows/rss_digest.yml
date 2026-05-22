@@ -1,0 +1,22 @@
+name: 📰 每日资讯 RSS
+
+on:
+  schedule:
+    # 北京时间 10:00（UTC 02:00）
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  rss:
+    name: 📰 抓取并推送 RSS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 抓取并推送
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: python scripts/daily_checkin/rss_digest.py
