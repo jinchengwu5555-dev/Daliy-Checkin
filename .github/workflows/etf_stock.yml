@@ -17,12 +17,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: 安装依赖
-        run: pip install requests yfinance -q
-      - name: 获取行情
-        run: python scripts/daily_checkin/etf_stock.py
-      - name: 推送 Server酱
-        if: env.SERVERCHAN_KEY != ''
+      - run: pip install requests yfinance -q
+      - name: 获取行情并推送
         env:
           SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: |
@@ -33,11 +29,13 @@ jobs:
               capture_output=True, text=True
           )
           output = result.stdout.strip()
-          key = os.environ.get('SERVERCHAN_KEY', '')
+          print(output)
+          key = os.environ.get('SERVERCHAN_KEY', '').strip()
           if key and output:
-              requests.post(
+              r = requests.post(
                   f'https://sctapi.ftqq.com/{key}.send',
                   data={'title': '📊 ETF行情播报', 'desp': output},
                   timeout=10
               )
+              print('Server酱推送:', r.json())
           EOF
