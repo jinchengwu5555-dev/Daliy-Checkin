@@ -121,7 +121,8 @@ class BaiduPan:
                 vip_str = vip_map.get(int(vip_type.group(1)), "普通用户") if vip_type else "普通用户"
                 if privacy_mode and len(user) > 2:
                     user = f"{user[0]}***{user[-1]}"
-                print(f"👤 用户: {user}  Lv.{lv}  {val}成长值  {vip_str}")
+                print(f"👤 用户: {user}  {vip_str}")
+                print(f"📊 成长值: Lv.{lv}  {val}成长值")
                 return user, lv, val, vip_str
         except Exception as e:
             print(f"⚠️ 获取用户信息异常: {e}")
