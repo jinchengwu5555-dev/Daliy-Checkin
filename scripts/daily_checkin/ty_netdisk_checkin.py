@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 天翼云盘签到 - GitHub Actions 版
-Secrets: TY_USERNAME（多账号换行分隔）
-         TY_PASSWORD（多账号换行分隔）
+Secrets: TY_USERNAME / TY_PASSWORD
 """
 
 import time
@@ -30,8 +29,6 @@ class TianYiYunPan:
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/76.0",
         })
 
-    # ── RSA 加密 ─────────────────────────────────────────────
-
     def _int2char(self, a): return BI_RM[a]
 
     def _b64tohex(self, a):
@@ -50,8 +47,6 @@ class TianYiYunPan:
         pem    = f"-----BEGIN PUBLIC KEY-----\n{j_rsakey}\n-----END PUBLIC KEY-----"
         pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(pem.encode())
         return self._b64tohex(base64.b64encode(rsa.encrypt(str(string).encode(), pubkey)).decode())
-
-    # ── 登录 ─────────────────────────────────────────────────
 
     def login(self):
         try:
@@ -87,7 +82,7 @@ class TianYiYunPan:
                 "mailSuffix":   "@189.cn",
                 "paramId":      paramId,
             }
-            r      = self.session.post(
+            r = self.session.post(
                 "https://open.e.189.cn/api/logbox/oauth2/loginSubmit.do",
                 data=data,
                 headers={"Referer": "https://open.e.189.cn/"},
@@ -99,13 +94,7 @@ class TianYiYunPan:
                 print(f"❌ 账号{self.index}: 登录失败 - {result.get('msg', '未知')}")
                 return False
 
-            # 跟随跳转写入 Cookie
             self.session.get(result["toUrl"], timeout=15, allow_redirects=True)
-
-            # 打印所有 cookie 名称（调试用）
-            cookie_names = [c.name for c in self.session.cookies]
-            print(f"  [Cookie列表] {cookie_names}")
-
             print(f"✅ 账号{self.index}: 登录成功")
             return True
 
@@ -113,77 +102,66 @@ class TianYiYunPan:
             print(f"❌ 账号{self.index}: 登录异常 - {e}")
             return False
 
-    # ── 签到（家庭云抽奖接口，只需 Session Cookie） ──────────
-
-    def sign_in(self):
-        """
-        使用家庭云每日签到抽奖接口
-        POST https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action
-        参数: taskId=SIGN_IN
-        该接口只需要登录后的 Session Cookie，无需 APP 签名
-        """
+    def probe_sign_apis(self):
+        """逐一探测所有已知签到接口，打印完整响应"""
         rand = str(round(time.time() * 1000))
-        url  = "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action"
 
-        # 先 GET 检查是否已签到
-        try:
-            r_check = self.session.get(
-                "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action",
-                params={"taskId": "SIGN_IN"},
-                timeout=15
-            )
-            check = r_check.json()
-            print(f"  [签到检查] {json.dumps(check, ensure_ascii=False)}")
-        except Exception as e:
-            print(f"  [签到检查] 异常: {e}")
-            check = {}
+        apis = [
+            # ── 当前主流签到接口候选 ──────────────────────────────
+            ("GET",  "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action",
+             {"taskId": "SIGN_IN"}, None),
 
-        # POST 执行签到
-        try:
-            r = self.session.post(
-                url,
-                data={"taskId": "SIGN_IN", "rand": rand},
-                headers={
-                    "Referer": "https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                timeout=15
-            )
-            result = r.json()
-            print(f"  [签到响应] {json.dumps(result, ensure_ascii=False)}")
+            ("POST", "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action",
+             None, {"taskId": "SIGN_IN", "rand": rand}),
 
-            # 解析结果
-            res_code  = str(result.get("result", result.get("code", "")))
-            prize     = result.get("prizeName", "")
-            desc      = result.get("description", result.get("message", ""))
-            bonus_mb  = result.get("netdiskBonus", result.get("prize", 0))
+            # 新版每日任务接口
+            ("GET",  "https://m.cloud.189.cn/v2/taskAction.action",
+             {"taskId": "SIGN_IN", "clientType": "wap"}, None),
 
-            if res_code == "ok" or prize:
-                reward = prize or f"{bonus_mb}M" or desc or "奖励"
-                print(f"✅ 账号{self.index}: 签到成功，获得 {reward}")
-                return reward, False
+            ("POST", "https://m.cloud.189.cn/v2/taskAction.action",
+             None, {"taskId": "SIGN_IN", "clientType": "wap"}),
 
-            if res_code in ("1", "error") or "失败" in desc or "操作失败" in desc:
-                # code=1 有时是"今日已签到"，有时是真正失败
-                # 结合 check 结果判断
-                if check.get("isSign") or check.get("signed"):
-                    print(f"📅 账号{self.index}: 今日已签到")
-                    return "今日已签到", True
-                print(f"❌ 账号{self.index}: 签到失败 - {desc or res_code}")
-                return f"失败({desc or res_code})", False
+            # 用户任务列表（看有哪些任务及状态）
+            ("GET",  "https://m.cloud.189.cn/v2/userTaskList.action",
+             {"clientType": "wap"}, None),
 
-            if "已" in desc or "重复" in desc or "today" in desc.lower():
-                print(f"📅 账号{self.index}: 今日已签到")
-                return "今日已签到", True
+            # 旧版 mkt 签到
+            ("GET",  f"https://api.cloud.189.cn/mkt/userSign.action"
+                     f"?rand={rand}&clientType=TELEANDROID&version=8.6.3&model=SM-G930K",
+             None, None),
 
-            print(f"⚠️  账号{self.index}: 未知结果 - {result}")
-            return str(result), False
+            # 用户信息（验证 session 是否有效）
+            ("GET",  "https://m.cloud.189.cn/v2/getUserInfoForPortal.action",
+             None, None),
 
-        except Exception as e:
-            print(f"❌ 账号{self.index}: 签到异常 - {e}")
-            return f"异常({e})", False
+            # 新版签到
+            ("GET",  "https://m.cloud.189.cn/api/portal/signIn.action",
+             {"rand": rand}, None),
 
-    # ── 工具 ─────────────────────────────────────────────────
+            ("POST", "https://m.cloud.189.cn/api/portal/signIn.action",
+             None, {"rand": rand}),
+
+            # 积分/成长任务
+            ("GET",  "https://m.cloud.189.cn/v2/signInInfo.action",
+             None, None),
+        ]
+
+        print("\n==== 接口探测开始 ====")
+        for method, url, params, data in apis:
+            try:
+                if method == "GET":
+                    r = self.session.get(url, params=params, timeout=10)
+                else:
+                    r = self.session.post(url, data=data, params=params,
+                                          headers={"Content-Type": "application/x-www-form-urlencoded"},
+                                          timeout=10)
+                # 截取响应（最多200字符）
+                body = r.text[:200].replace('\n', ' ')
+                print(f"[{method}] {r.status_code} {url.split('/')[-1].split('?')[0]}")
+                print(f"  → {body}")
+            except Exception as e:
+                print(f"[{method}] ERR {url.split('/')[-1].split('?')[0]}: {e}")
+        print("==== 接口探测结束 ====")
 
     @staticmethod
     def _mask(s):
@@ -194,9 +172,7 @@ class TianYiYunPan:
         print(f"\n==== 天翼云盘 账号{self.index} ====")
         if not self.login():
             return
-        reward, already = self.sign_in()
-        if not already:
-            print(f"📊 账号{self.index}: {reward}")
+        self.probe_sign_apis()
         print(f"⏰ {datetime.now().strftime('%m-%d %H:%M')}")
 
 
@@ -213,15 +189,8 @@ def main():
     usernames = [u.strip() for u in ty_username_env.split('\n') if u.strip()]
     passwords = [p.strip() for p in ty_password_env.split('\n') if p.strip()]
 
-    if len(usernames) != len(passwords):
-        print("❌ 用户名和密码数量不匹配")
-        raise SystemExit(1)
-
     print(f"📝 共 {len(usernames)} 个账号")
-    for i, (u, p) in enumerate(zip(usernames, passwords)):
-        if i > 0:
-            time.sleep(random.uniform(5, 10))
-        TianYiYunPan(u, p, i + 1).run()
+    TianYiYunPan(usernames[0], passwords[0], 1).run()
 
     print(f"\n==== 完成 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ====")
 
