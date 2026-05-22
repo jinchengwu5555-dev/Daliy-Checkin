@@ -13,8 +13,6 @@ CST = timezone(timedelta(hours=8))
 
 TASKS = [
     ("baidu",     "☁️ 百度网盘",  "output-baidu"),
-    ("tianyiyun", "☁️ 天翼云盘",  "output-tianyiyun"),
-    ("quark",     "🟠 夸克网盘",  "output-quark"),
     ("bilibili",  "📺 Bilibili",  "output-bilibili"),
     ("juejin",    "🪙 掘金",      "output-juejin"),
     ("jd",        "🛒 京东",      "output-jd"),
@@ -59,7 +57,7 @@ def extract_summary(label, output):
     lines = clean_output(output)
 
     if "百度网盘" in label:
-        keys = ["👤 账号:", "🏆 等级:", "💎 会员:", "📝 签到:", "🤔 答题:"]
+        keys = ["👤 用户:", "📊 成长值:", "📝 签到:", "🤔 答题:"]
         result = []
         for l in lines:
             if any(k in l for k in keys):
@@ -99,8 +97,8 @@ def extract_summary(label, output):
         return [l for l in lines if any(k in l for k in keys)]
 
     if "NBA" in label:
-        skip = ["ESPN让分数据获取成功", "[信息]", "[警告]", "[错误]"]
-        return [l for l in lines if l.strip() and not any(k in l for k in skip)]
+        skip = ["ESPN让分数据获取成功", "[信息]", "[警告]"]
+        return [l for l in lines if l.strip() and not any(k in l for k in skip) and not re.match(r'^|[-: |]+|$', l)]
 
     if "ETF" in label:
         # 去掉表格分隔行，保留标题行和数据行
