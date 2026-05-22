@@ -1,0 +1,20 @@
+name: ☁️ 天翼云盘签到（单独测试）
+
+on:
+  workflow_dispatch:  # 只支持手动触发
+
+jobs:
+  tianyiyun:
+    name: ☁️ 天翼云盘签到
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests rsa -q
+      - name: 执行签到
+        env:
+          TY_USERNAME: ${{ secrets.TY_USERNAME }}
+          TY_PASSWORD: ${{ secrets.TY_PASSWORD }}
+        run: python scripts/daily_checkin/ty_netdisk_checkin.py
