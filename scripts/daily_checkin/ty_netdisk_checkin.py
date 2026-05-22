@@ -3,34 +3,40 @@
 """
 天翼云盘签到 - GitHub Actions 版
 Secrets: TY_USERNAME（多账号换行分隔）
-         TY_PASSWORD（多账号换行分隔，与用户名一一对应）
+         TY_PASSWORD（多账号换行分隔）
 """
 
 import time
 import re
 import base64
 import random
+import hashlib
+import hmac
 import requests
 import rsa
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 BI_RM  = list("0123456789abcdefghijklmnopqrstuvwxyz")
 B64MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
+APP_ID     = "8025431004"
+APP_SECRET = "469a2536f8db3fcb"
+
 
 class TianYiYunPan:
     def __init__(self, username, password, index):
-        self.username = username
-        self.password = password
-        self.index    = index
-        self.session  = requests.Session()
+        self.username    = username
+        self.password    = password
+        self.index       = index
+        self.session_key = ""
+        self.session     = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/76.0',
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/76.0",
         })
 
-    # ── RSA 加密 ────────────────────────────────
+    # ── RSA 加密 ────────────────────────────────────────────
 
     def _int2char(self, a):
         return BI_RM[a]
@@ -40,34 +46,57 @@ class TianYiYunPan:
         for ch in a:
             if ch != "=":
                 v = B64MAP.index(ch)
-                if e == 0:   e=1; d+=self._int2char(v>>2);         c=3&v
-                elif e == 1: e=2; d+=self._int2char(c<<2|v>>4);    c=15&v
+                if e == 0:   e=1; d+=self._int2char(v>>2);              c=3&v
+                elif e == 1: e=2; d+=self._int2char(c<<2|v>>4);         c=15&v
                 elif e == 2: e=3; d+=self._int2char(c); d+=self._int2char(v>>2); c=3&v
-                else:        e=0; d+=self._int2char(c<<2|v>>4);    d+=self._int2char(15&v)
+                else:        e=0; d+=self._int2char(c<<2|v>>4); d+=self._int2char(15&v)
         if e == 1: d += self._int2char(c << 2)
         return d
 
     def _rsa_encode(self, j_rsakey, string):
-        rsa_key = f"-----BEGIN PUBLIC KEY-----\n{j_rsakey}\n-----END PUBLIC KEY-----"
-        pubkey  = rsa.PublicKey.load_pkcs1_openssl_pem(rsa_key.encode())
+        pem    = f"-----BEGIN PUBLIC KEY-----\n{j_rsakey}\n-----END PUBLIC KEY-----"
+        pubkey = rsa.PublicKey.load_pkcs1_openssl_pem(pem.encode())
         return self._b64tohex(base64.b64encode(rsa.encrypt(str(string).encode(), pubkey)).decode())
 
-    # ── 登录 ────────────────────────────────────
+    # ── 签名生成 ─────────────────────────────────────────────
+
+    def _sign(self, params: dict) -> str:
+        """
+        天翼云盘 API 签名：
+        1. 参数按 key 字典序排列
+        2. 拼成 key=value&key=value
+        3. HMAC-SHA1，key = APP_SECRET
+        4. Base64 编码
+        """
+        sorted_str = "&".join(f"{k}={v}" for k, v in sorted(params.items()))
+        mac = hmac.new(APP_SECRET.encode(), sorted_str.encode(), hashlib.sha1)
+        return base64.b64encode(mac.digest()).decode()
+
+    def _build_params(self, extra: dict = None) -> dict:
+        params = {
+            "appId":      APP_ID,
+            "sessionKey": self.session_key,
+            "timeStamp":  str(int(time.time() * 1000)),
+        }
+        if extra:
+            params.update(extra)
+        params["signature"] = self._sign(params)
+        return params
+
+    # ── 登录 ─────────────────────────────────────────────────
 
     def login(self):
         try:
             print(f"👤 账号{self.index}: 登录 {self._mask(self.username)}")
 
-            # 1. 获取登录入口 URL
-            r = self.session.get(
+            r    = self.session.get(
                 "https://m.cloud.189.cn/udb/udb_login.jsp"
                 "?pageId=1&pageKey=default&clientType=wap"
                 "&redirectURL=https://m.cloud.189.cn/zhuanti/2021/shakeLottery/index.html",
                 timeout=15
             )
-            url = re.search(r"https?://[^\s'\"]+", r.text).group()
-            r   = self.session.get(url, timeout=15)
-
+            url  = re.search(r"https?://[^\s'\"]+", r.text).group()
+            r    = self.session.get(url, timeout=15)
             href = re.search(r'<a id="j-tab-login-link"[^>]*href="([^"]+)"', r.text).group(1)
             r    = self.session.get(href, timeout=15)
 
@@ -79,7 +108,6 @@ class TianYiYunPan:
 
             self.session.headers.update({"lt": lt})
 
-            # 2. 提交登录
             data = {
                 "appKey":       "cloud",
                 "accountType":  "01",
@@ -100,43 +128,51 @@ class TianYiYunPan:
             result = r.json()
 
             if result.get("result") != 0:
-                print(f"❌ 账号{self.index}: 登录失败 - {result.get('msg', '未知错误')}")
+                print(f"❌ 账号{self.index}: 登录失败 - {result.get('msg', '未知')}")
                 return False
 
-            # 3. 跟随跳转，获取 sessionKey
-            redirect_url = result["toUrl"]
-            r = self.session.get(redirect_url, timeout=15)
+            # 跟随跳转，写入 Cookie
+            self.session.get(result["toUrl"], timeout=15)
 
-            # 从 cookie 或 URL 中提取 sessionKey
-            self.session_key = ""
+            # 提取 sessionKey（COOKIE_LOGIN_USER 或直接从 URL 里找）
             for cookie in self.session.cookies:
-                if cookie.name in ("COOKIE_LOGIN_USER", "sessionKey", "accessToken"):
+                if cookie.name in ("COOKIE_LOGIN_USER", "accessToken"):
                     self.session_key = cookie.value
                     break
 
-            print(f"✅ 账号{self.index}: 登录成功")
+            # 如果 cookie 里没有，尝试从 getUserInfoForPortal 接口拿
+            if not self.session_key:
+                self.session_key = self._get_session_key_from_api()
+
+            if not self.session_key:
+                print(f"⚠️  账号{self.index}: 未能获取 sessionKey，签到可能失败")
+            else:
+                print(f"✅ 账号{self.index}: 登录成功（sessionKey 长度={len(self.session_key)}）")
             return True
 
         except Exception as e:
             print(f"❌ 账号{self.index}: 登录异常 - {e}")
             return False
 
-    # ── 签到（新接口） ───────────────────────────
+    def _get_session_key_from_api(self) -> str:
+        """通过用户信息接口换取 sessionKey"""
+        try:
+            r = self.session.get(
+                "https://m.cloud.189.cn/v2/getUserInfoForPortal.action",
+                timeout=10
+            )
+            data = r.json()
+            return data.get("sessionKey", "")
+        except Exception:
+            return ""
+
+    # ── 签到 ─────────────────────────────────────────────────
 
     def sign_in(self):
-        """
-        天翼云盘目前有两套签到接口，优先用新接口，失败降级到旧接口
-        """
-        bonus = 0
-        already_signed = False
-
-        # ── 新接口 ──────────────────────────────
+        # 方案 A：带签名的新接口
         try:
-            rand = str(round(time.time() * 1000))
-            url  = (
-                "https://api.cloud.189.cn/mkt/userSign.action"
-                f"?rand={rand}&clientType=TELEANDROID&version=8.6.3&model=SM-G930K"
-            )
+            params = self._build_params({"clientType": "TELEANDROID", "version": "8.6.3"})
+            url    = "https://api.cloud.189.cn/mkt/userSign.action"
             headers = {
                 "User-Agent": (
                     "Mozilla/5.0 (Linux; Android 5.1.1; SM-G930K Build/NRD90M; wv) "
@@ -148,46 +184,49 @@ class TianYiYunPan:
                 ),
                 "Referer": "https://m.cloud.189.cn/zhuanti/2016/sign/index.jsp?albumBackupOpened=1",
             }
-            result = self.session.get(url, headers=headers, timeout=15).json()
-            print(f"  [签到原始响应] {json.dumps(result, ensure_ascii=False)}")
+            r      = self.session.get(url, params=params, headers=headers, timeout=15)
+            result = r.json()
+            print(f"  [签到响应A] {json.dumps(result, ensure_ascii=False)}")
 
-            bonus          = int(result.get("netdiskBonus", 0))
-            is_sign        = str(result.get("isSign", "")).lower()
-            already_signed = (is_sign == "true")
+            if result.get("errorCode") or result.get("success") is None:
+                raise ValueError(f"接口A失败: {result}")
 
-            if already_signed and bonus == 0:
-                # isSign=true 且 bonus=0 → 确认已签到但拿不到今日奖励
-                print(f"📅 账号{self.index}: 今日已签到（netdiskBonus=0，可能接口已改版）")
-            elif not already_signed:
+            bonus    = int(result.get("netdiskBonus", 0))
+            is_sign  = str(result.get("isSign", "false")).lower()
+            if is_sign == "false":
                 print(f"✅ 账号{self.index}: 签到成功，获得 {bonus}M 空间")
             else:
                 print(f"📅 账号{self.index}: 今日已签到，获得 {bonus}M 空间")
-
-            return already_signed, bonus
+            return bonus, is_sign == "true"
 
         except Exception as e:
-            print(f"⚠️ 账号{self.index}: 旧签到接口异常 - {e}，尝试新接口")
+            print(f"  接口A异常: {e}，降级到方案B")
 
-        # ── 降级：family 签到接口 ───────────────
+        # 方案 B：wap 签到接口（无需签名，依赖 Session Cookie）
         try:
-            rand = str(round(time.time() * 1000))
-            url  = (
-                "https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action"
-                f"?taskId=SIGN_IN&rand={rand}"
-            )
-            result = self.session.get(url, timeout=15).json()
-            print(f"  [降级接口响应] {json.dumps(result, ensure_ascii=False)}")
-            desc = result.get("description", "")
-            if "成功" in desc or "奖励" in desc:
-                print(f"✅ 账号{self.index}: 签到成功 - {desc}")
-                return False, 0
-            print(f"⚠️ 账号{self.index}: 签到结果不明 - {desc}")
-            return False, 0
-        except Exception as e2:
-            print(f"❌ 账号{self.index}: 降级接口也失败 - {e2}")
-            return False, 0
+            rand    = str(round(time.time() * 1000))
+            url     = f"https://m.cloud.189.cn/v2/drawPrizeMarketDetails.action?taskId=SIGN_IN&rand={rand}"
+            r       = self.session.get(url, timeout=15)
+            result  = r.json()
+            print(f"  [签到响应B] {json.dumps(result, ensure_ascii=False)}")
 
-    # ── 工具 ────────────────────────────────────
+            desc = result.get("description", "")
+            prize = result.get("prizeName", "")
+            if result.get("result") == "ok" or "成功" in desc or prize:
+                reward = prize or desc or "未知奖励"
+                print(f"✅ 账号{self.index}: 签到成功，获得 {reward}")
+                return 0, False
+            if "已" in desc or "重复" in desc:
+                print(f"📅 账号{self.index}: 今日已签到")
+                return 0, True
+            print(f"⚠️  账号{self.index}: 签到结果不明 - {desc}")
+            return 0, False
+
+        except Exception as e:
+            print(f"❌ 账号{self.index}: 方案B也失败 - {e}")
+            return 0, False
+
+    # ── 工具 ─────────────────────────────────────────────────
 
     @staticmethod
     def _mask(s):
@@ -199,11 +238,9 @@ class TianYiYunPan:
         print(f"\n==== 天翼云盘 账号{self.index} ====")
         if not self.login():
             return
-        already, bonus = self.sign_in()
-        if already:
-            print(f"📊 账号{self.index}: 今日已签到，积累空间 {bonus}M")
-        else:
-            print(f"📊 账号{self.index}: 签到完成，本次获得 {bonus}M 空间")
+        bonus, already = self.sign_in()
+        if not already:
+            print(f"📊 账号{self.index}: 本次获得 {bonus}M 空间")
         print(f"⏰ {datetime.now().strftime('%m-%d %H:%M')}")
 
 
