@@ -52,7 +52,7 @@ class BaiduPan:
                     return True, f"签到成功，获得{pts}积分"
                 if error_msg and error_msg.group(1):
                     msg = error_msg.group(1)
-                    if any(k in msg for k in ["已签到", "重复签到", "not allow"]):
+                    if any(k in msg for k in ["已签到", "重复签到", "not allow", "repeat"]):
                         print("📅 今日已签到")
                         return True, "今日已签到"
                     print(f"❌ 签到失败: {msg}")
