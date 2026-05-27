@@ -113,11 +113,11 @@ def extract_summary(label, output):
         if "RSS" in label:
         # RSS 内容已经是格式化好的 markdown，直接返回非空行
         # 去掉重复的标题行（第一行是 # 📰 每日资讯...）
-        result = []
-        for l in lines:
-            if l.strip() and not l.startswith("# 📰"):
-                result.append(l)
-        return result
+            result = []
+            for l in lines:
+                if l.strip() and not l.startswith("# 📰"):
+                    result.append(l)
+            return result
 
     return [l for l in lines if l.strip()]
 
