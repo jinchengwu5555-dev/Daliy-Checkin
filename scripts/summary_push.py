@@ -99,31 +99,26 @@ def extract_summary(label, output):
 
     if "NBA" in label:
         skip = ["ESPN让分数据获取成功", "[信息]", "[警告]"]
-        return [l for l in lines if l.strip() and not any(k in l for k in skip) and not re.match(r'^|[-: |]+|$', l)]
+        return [l for l in lines if l.strip() and not any(k in l for k in skip) and not re.match(r'^\|[-: |]+\|$', l)]
 
     if "ETF" in label:
-        # 去掉表格分隔行，保留标题行和数据行
-        return [l for l in lines if l.strip() and not re.match(r'^\|[-: |]+\|$', l)]
+        # 保留表格分隔行，markdown 表格渲染需要它
+        return [l for l in lines if l.strip()]
 
     if "汇率" in label:
-        # 去掉表格分隔行，其余保留完整换行（Server酱支持 markdown 表格）
-        return [l for l in lines if l.strip() and not re.match(r'^\|[-: |]+\|$', l)]
+        # 保留表格分隔行，markdown 表格渲染需要它
+        return [l for l in lines if l.strip()]
 
     if "60s" in label:
-        if "RSS" in label:
-        # RSS 内容已经是格式化好的 markdown，直接返回非空行
-        # 去掉重复的标题行（第一行是 # 📰 每日资讯...）
-            result = []
-            for l in lines:
-                if l.strip() and not l.startswith("# 📰"):
-                    result.append(l)
-            return result
-
-    return [l for l in lines if l.strip()]
+        # 每条新闻后插入空行，Server酱 markdown 需要 \n\n 才能换行
+        result = []
+        for l in lines:
+            if l.strip():
+                result.append(l)
+                result.append("")
+        return result
 
     if "RSS" in label:
-        # RSS 内容已经是格式化好的 markdown，直接返回非空行
-        # 去掉重复的标题行（第一行是 # 📰 每日资讯...）
         result = []
         for l in lines:
             if l.strip() and not l.startswith("# 📰"):
