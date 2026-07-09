@@ -8,6 +8,7 @@ RSS 每日摘要 - GitHub Actions 版
 
 import os
 import re
+import time
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
@@ -25,7 +26,6 @@ FEEDS = [
     # 🇺🇸 美国
     ("us",       "🇺🇸 美国",         "https://feeds.bbci.co.uk/news/world/us_and_canada/rss.xml", 3),
     # 🇲🇾 马来西亚
-    ("my_mm",    "🇲🇾 马来 (Malay Mail)", "https://www.malaymail.com/feed",                       3),
     ("my_fmt",   "🇲🇾 马来 (FMT)",   "https://www.freemalaysiatoday.com/category/nation/feed/",   3),
     # 💰 财经
     ("biz",      "💰 财经",          "https://feeds.bbci.co.uk/news/business/rss.xml",             4),
@@ -50,6 +50,24 @@ def clean(text: str) -> str:
     text = re.sub(r'<!\[CDATA\[|\]\]>', '', text)
     text = re.sub(r'<[^>]+>', '', text)
     return unescape(text).strip()
+
+
+CJK_RE = re.compile(r'[\u4e00-\u9fff]')
+
+
+def translate_to_zh(text: str) -> str | None:
+    """英译中，失败返回 None（Google 免费接口，无需密钥）"""
+    try:
+        r = requests.get(
+            'https://translate.googleapis.com/translate_a/single',
+            params={'client': 'gtx', 'sl': 'en', 'tl': 'zh-CN', 'dt': 't', 'q': text},
+            timeout=8,
+        )
+        data = r.json()
+        zh = ''.join(seg[0] for seg in data[0] if seg and seg[0])
+        return zh.strip() or None
+    except Exception:
+        return None
 
 
 def fetch_feed(url: str, max_items: int) -> list[dict]:
@@ -95,13 +113,21 @@ def build_digest() -> tuple[str, int]:
         for item in items:
             t = item["title"]
             l = item["link"]
-            # Server酱 Markdown 支持链接，但太长会截断
-            # 标题超过 60 字符截断
-            t_short = t[:58] + "…" if len(t) > 60 else t
-            if l:
-                lines.append(f"- [{t_short}]({l})")
+            if CJK_RE.search(t):
+                # 本身是中文，直接输出
+                t_short = t[:58] + "…" if len(t) > 60 else t
+                lines.append(f"- [{t_short}]({l})" if l else f"- {t_short}")
             else:
-                lines.append(f"- {t_short}")
+                # 英文标题：翻译成中文，双语显示
+                zh = translate_to_zh(t)
+                en_short = t[:48] + "…" if len(t) > 50 else t
+                if zh:
+                    zh_short = zh[:42] + "…" if len(zh) > 44 else zh
+                    lines.append(f"- [{zh_short}]({l})" if l else f"- {zh_short}")
+                    lines.append(f"  *{en_short}*")
+                else:
+                    lines.append(f"- [{en_short}]({l})" if l else f"- {en_short}")
+                time.sleep(0.2)  # 翻译接口限速保护
         total += len(items)
 
     if failed:
@@ -144,15 +170,8 @@ def main():
     print(f"==== RSS 摘要 {now} ====")
 
     digest, total = build_digest()
-
-    # 打印摘要预览
-    for line in digest.split("\n")[:6]:
-        print(line)
-    print(f"... 共 {total} 条")
-
-    # 直接打印完整内容（由 summary_push.py 统一推送）
+    print(f"共获取 {total} 条")
     print(digest)
-    print("==== 完成 ====")
 
 
 if __name__ == "__main__":
