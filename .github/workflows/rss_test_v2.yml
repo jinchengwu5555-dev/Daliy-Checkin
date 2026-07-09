@@ -1,0 +1,38 @@
+name: 🧪 RSS双语测试 V2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 🧪 RSS 测试 V2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 确认脚本内容
+        run: grep -n "SCRIPT_VERSION\|translate_to_zh\|malaymail" scripts/daily_checkin/rss_digest_v2.py || true
+      - name: 运行 RSS 脚本
+        run: |
+          python scripts/daily_checkin/rss_digest_v2.py | tee /tmp/rss.txt
+      - name: 推送到微信预览实际渲染效果
+        env:
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
+        run: |
+          python - << 'EOF'
+          import os, requests
+          content = open('/tmp/rss.txt').read()
+          content = '\n'.join(
+              l for l in content.split('\n')
+              if '脚本版本' not in l and not l.startswith('====') and not l.startswith('共获取')
+          )[:4800]
+          r = requests.post(
+              f"https://sctapi.ftqq.com/{os.environ['SERVERCHAN_KEY']}.send",
+              data={'title': '🧪 RSS双语测试', 'desp': content},
+              timeout=15
+          )
+          print('推送结果:', r.status_code, r.text[:200])
+          EOF
