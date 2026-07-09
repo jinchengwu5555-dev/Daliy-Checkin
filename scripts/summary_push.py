@@ -15,7 +15,6 @@ TASKS = [
     ("baidu",     "☁️ 百度网盘",  "output-baidu"),
     ("bilibili",  "📺 Bilibili",  "output-bilibili"),
     ("juejin",    "🪙 掘金",      "output-juejin"),
-    ("jd",        "🛒 京东",      "output-jd"),
     ("nba",       "🏀 NBA赛程",   "output-nba"),
     ("etf",       "📊 ETF行情",   "output-etf"),
     ("exchange",  "💱 今日汇率",  "output-exchange"),
@@ -86,15 +85,12 @@ def extract_summary(label, output):
         return result
 
     if "Bilibili" in label:
-        keys = ["用户:", "签到", "观看", "投币", "分享"]
+        keys = ["用户:", "签到", "观看", "投币", "分享",
+                "今日成长值", "当前等级", "还需"]
         return [l for l in lines if any(k in l for k in keys)]
 
     if "掘金" in label:
         keys = ["用户:", "签到", "矿石", "连续", "沾喜气", "免费抽奖", "当前矿石"]
-        return [l for l in lines if any(k in l for k in keys)]
-
-    if "京东" in label:
-        keys = ["签到", "积分", "京豆", "连续", "失败", "已签到", "Cookie"]
         return [l for l in lines if any(k in l for k in keys)]
 
     if "NBA" in label:
