@@ -54,10 +54,9 @@ def test(cookie: str):
     try:
         r = requests.get('https://api.bilibili.com/x/member/web/exp/reward',
                          headers=headers, timeout=10)
-
-        print(f"[调试] 请求 URL: {r.url}")
-        print(f"[调试] HTTP 状态: {r.status_code}, 前100字符: {r.text[:100]}")
-
+        print(f"[调试] 实际请求 URL: {r.url}")
+        print(f"[调试] HTTP 状态码: {r.status_code}")
+        print(f"[调试] 响应前200字符: {r.text[:200]}")
         d = r.json()
         print(f"[调试] exp/reward 原始返回: {d}")
         if d.get('code') == 0:
