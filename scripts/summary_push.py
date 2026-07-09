@@ -102,8 +102,8 @@ def extract_summary(label, output):
         return [l for l in lines if l.strip()]
 
     if "汇率" in label:
-        # 保留表格分隔行，markdown 表格渲染需要它
-        return [l for l in lines if l.strip()]
+        # 原样保留（含空行），两张表之间必须有空行才能正确渲染
+        return lines
 
     if "60s" in label:
         # 每条新闻后插入空行，Server酱 markdown 需要 \n\n 才能换行
