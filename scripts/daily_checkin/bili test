@@ -49,23 +49,23 @@ def test(cookie: str):
 
     # ── 2. 今日任务经验明细 ──
     print("=" * 40)
-    print("步骤 2/2: 今日成长值明细（home/reward 接口）")
+    print("步骤 2/2: 今日成长值明细（exp/reward 接口）")
     today_exp = None
     try:
-        r = requests.get('https://account.bilibili.com/home/reward',
+        r = requests.get('https://api.bilibili.com/x/member/web/exp/reward',
                          headers=headers, timeout=10)
         d = r.json()
-        print(f"[调试] home/reward 原始返回: {d}")
+        print(f"[调试] exp/reward 原始返回: {d}")
         if d.get('code') == 0:
             rw = d['data']
             login_exp = 5 if rw.get('login') else 0
-            watch_exp = 5 if (rw.get('watch_av') or rw.get('watch')) else 0
-            share_exp = 5 if (rw.get('share_av') or rw.get('share')) else 0
-            coin_exp = int(rw.get('coins_av', rw.get('coins', 0)) or 0)
+            watch_exp = 5 if rw.get('watch') else 0
+            share_exp = 5 if rw.get('share') else 0
+            coin_exp = int(rw.get('coins', 0) or 0)
             today_exp = login_exp + watch_exp + share_exp + coin_exp
             print(f"  登录: +{login_exp}  观看: +{watch_exp}  分享: +{share_exp}  投币: +{coin_exp}")
         else:
-            print(f"⚠️ 接口返回异常: code={d.get('code')}")
+            print(f"⚠️ 接口返回异常: code={d.get('code')} message={d.get('message')}")
     except Exception as e:
         print(f"⚠️ 请求失败: {e}")
 
