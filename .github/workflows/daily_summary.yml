@@ -87,32 +87,6 @@ jobs:
           retention-days: 1
 
   # ──────────────────────────────────────────────
-  # 4. 京东签到
-  # ──────────────────────────────────────────────
-  jd:
-    name: 🛒 京东签到
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: npm install axios
-      - name: 执行签到
-        env:
-          JD_COOKIE: ${{ secrets.JD_COOKIE }}
-        run: |
-          mkdir -p /tmp/job_outputs
-          node scripts/daily_checkin/jd_sign.js 2>&1 | tee /tmp/job_outputs/jd.txt
-      - name: 上传输出
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: output-jd
-          path: /tmp/job_outputs/jd.txt
-          retention-days: 1
-
-  # ──────────────────────────────────────────────
   # 5. NBA 赛程
   # ──────────────────────────────────────────────
   nba:
@@ -242,7 +216,6 @@ jobs:
       - baidu
       - bilibili
       - juejin
-      - jd
       - nba
       - etf
       - exchange
@@ -267,7 +240,6 @@ jobs:
           RESULT_BAIDU:    ${{ needs.baidu.result }}
           RESULT_BILIBILI: ${{ needs.bilibili.result }}
           RESULT_JUEJIN:   ${{ needs.juejin.result }}
-          RESULT_JD:       ${{ needs.jd.result }}
           RESULT_NBA:      ${{ needs.nba.result }}
           RESULT_ETF:      ${{ needs.etf.result }}
           RESULT_EXCHANGE: ${{ needs.exchange.result }}
