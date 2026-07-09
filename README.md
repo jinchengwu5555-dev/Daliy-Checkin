@@ -10,7 +10,6 @@
 .github/
   workflows/
     daily_summary.yml        # 主工作流：每天 07:50 (北京时间) 运行全部任务并汇总推送
-    rss_digest.yml           # 单独工作流：每天 10:00 (北京时间) RSS 摘要
 scripts/
   daily_checkin/
     baiduwangpan_checkin.py  # 百度网盘签到
@@ -43,7 +42,6 @@ scripts/
 | 工作流 | cron (UTC) | 北京时间 | 内容 |
 |:---|:---|:---|:---|
 | `daily_summary.yml` | `50 23 * * *` | 每天 07:50 | 签到 + NBA + ETF + 汇率 + 新闻 + RSS，汇总为一条推送 |
-| `rss_digest.yml` | `0 2 * * *` | 每天 10:00 | RSS 资讯摘要单独推送 |
 
 > GitHub Actions 的 cron 使用 UTC 时间（北京时间 = UTC+8），触发有约 ±15 分钟延迟，属正常现象。
 
