@@ -115,10 +115,18 @@ def extract_summary(label, output):
         return result
 
     if "RSS" in label:
+        import re as _re
         result = []
         for l in lines:
-            if l.strip() and not l.startswith("# 📰"):
-                result.append(l)
+            ls = l.strip()
+            if not ls:
+                continue
+            # 过滤标题、诊断和统计杂项行
+            if l.startswith("# 📰") or ls.startswith("====") or ls.startswith("共获取"):
+                continue
+            if ls.startswith("🔖") or _re.match(r"^[⚠️❌]+\s", ls):
+                continue
+            result.append(l)
         return result
 
     return [l for l in lines if l.strip()]
