@@ -36,8 +36,9 @@ def clean_output(output):
     skip_patterns = [
         r"^##\s*(开始执行|执行结束)",
         r"^tee:",
-        r"^\s*$",
     ]
+    # 注意：不要在这里过滤空行！markdown 表格/段落渲染依赖空行，
+    # 需要去空行的板块在 extract_summary 各自分支中自行处理。
     lines = []
     for line in output.splitlines():
         if any(re.match(p, line) for p in skip_patterns):
