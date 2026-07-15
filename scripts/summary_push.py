@@ -185,15 +185,29 @@ def main():
         return
 
     title = f"📋 每日汇总 {now}（{success_count}/{total}）"
-    try:
-        r = requests.post(
-            f"https://sctapi.ftqq.com/{sc_key}.send",
-            data={"title": title, "desp": desp},
-            timeout=10,
-        )
-        print(f"\n✅ Server酱推送: {r.json()}")
-    except Exception as e:
-        print(f"\n❌ Server酱推送失败: {e}")
+
+    # Server酱 内容长度保护（desp 过长会被拒绝或处理超时）
+    MAX_DESP = 30000
+    if len(desp) > MAX_DESP:
+        desp = desp[:MAX_DESP] + "\n\n…（内容过长已截断）"
+
+    import time as _time
+    last_err = None
+    for attempt in range(1, 4):
+        try:
+            r = requests.post(
+                f"https://sctapi.ftqq.com/{sc_key}.send",
+                data={"title": title, "desp": desp},
+                timeout=30,
+            )
+            print(f"\n✅ Server酱推送(第{attempt}次尝试): {r.json()}")
+            return
+        except Exception as e:
+            last_err = e
+            print(f"\n⚠️ 第{attempt}次推送失败: {e}")
+            if attempt < 3:
+                _time.sleep(5 * attempt)  # 5s、10s 退避后重试
+    print(f"\n❌ Server酱推送最终失败（已重试3次）: {last_err}")
 
 
 if __name__ == "__main__":
