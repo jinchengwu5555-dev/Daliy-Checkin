@@ -1,0 +1,19 @@
+name: 🧪 60s新闻测试 V2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: 🧪 60s 测试 V2
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install requests -q
+      - name: 确认脚本内容
+        run: grep -n "SCRIPT_VERSION\|jsdelivr\|static-host" scripts/daily_checkin/news_60s_v2.py
+      - name: 运行新闻脚本
+        run: python scripts/daily_checkin/news_60s_v2.py
