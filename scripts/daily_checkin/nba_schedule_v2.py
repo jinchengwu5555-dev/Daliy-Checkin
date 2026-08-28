@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 """
 NBA 每日赛程 - GitHub Actions 版
-数据源：优先 NBA 官方 cdn.nba.com，失败回退 ESPN
+数据源：data.nba.com 整季赛程静态文件（不拦机房 IP），从整季数据筛当天比赛
+备用：cdn.nba.com 今日赛程（若可用）
 """
 
 import requests
 from datetime import datetime, timezone, timedelta
 
 CST = timezone(timedelta(hours=8))
-ET = timezone(timedelta(hours=-5))  # NBA 赛程以美东时间为基准
 HEADERS = {
     'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
                    'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -18,100 +18,98 @@ HEADERS = {
     'Accept': 'application/json',
 }
 
-NBA_TODAY = 'https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json'
-ESPN_SB = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard'
+
+SCRIPT_VERSION = 'nba-v3-20260828'
 
 
-SCRIPT_VERSION = 'nba-v2-20260828'
+def season_year():
+    """NBA 赛季以开赛年为准：8 月及以后属当年新赛季，之前属上一年"""
+    now = datetime.now(CST)
+    return now.year if now.month >= 8 else now.year - 1
 
 
-def utc_to_cst(utc_str: str) -> str:
+# 整季赛程静态文件（{year} 为赛季起始年，如 2026-27 赛季填 2026）
+FULL_SCHEDULE = 'https://data.nba.com/data/10s/v2015/json/mobile_teams/nba/{year}/league/00_full_schedule.json'
+
+
+def utc_to_cst_parts(utc_str: str):
+    """把 UTC 时间字符串转成 (北京日期 YYYY-MM-DD, 北京时刻 HH:MM)"""
     try:
-        dt = datetime.fromisoformat(utc_str.replace('Z', '+00:00'))
-        return dt.astimezone(CST).strftime('%H:%M')
+        dt = datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
     except Exception:
-        return ''
+        try:
+            dt = datetime.strptime(utc_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+        except Exception:
+            return '', ''
+    cst = dt.astimezone(CST)
+    return cst.strftime('%Y-%m-%d'), cst.strftime('%H:%M')
 
 
-def parse_nba_official(data):
-    """解析 NBA 官方 todaysScoreboard，返回统一结构的 games 列表"""
-    sb = data.get('scoreboard', {})
-    games = []
-    for g in sb.get('games', []):
-        home = g.get('homeTeam', {})
-        away = g.get('awayTeam', {})
-        # gameStatus: 1=未开始 2=进行中 3=已结束
-        st = g.get('gameStatus', 1)
-        state = {1: 'pre', 2: 'in', 3: 'post'}.get(st, 'pre')
-        games.append({
-            'home': f"{home.get('teamCity','')} {home.get('teamName','')}".strip(),
-            'away': f"{away.get('teamCity','')} {away.get('teamName','')}".strip(),
-            'home_score': int(home.get('score') or 0),
-            'away_score': int(away.get('score') or 0),
-            'state': state,
-            'status_txt': g.get('gameStatusText', '').strip(),
-            'start_cst': utc_to_cst(g.get('gameTimeUTC', '')),
-        })
-    return games
-
-
-def parse_espn(data):
-    """解析 ESPN scoreboard（备用源）"""
-    games = []
-    for event in data.get('events', []):
-        comp = event.get('competitions', [{}])[0]
-        cs = comp.get('competitors', [])
-        home = next((c for c in cs if c.get('homeAway') == 'home'), None)
-        away = next((c for c in cs if c.get('homeAway') == 'away'), None)
-        if not home or not away:
-            continue
-        stype = event.get('status', {}).get('type', {})
-        state = stype.get('state', 'pre')
-        games.append({
-            'home': f"{home['team'].get('location','')} {home['team'].get('name','')}".strip(),
-            'away': f"{away['team'].get('location','')} {away['team'].get('name','')}".strip(),
-            'home_score': int(home.get('score') or 0),
-            'away_score': int(away.get('score') or 0),
-            'state': state,
-            'status_txt': stype.get('shortDetail', ''),
-            'start_cst': utc_to_cst(event.get('date', '')),
-        })
-    return games
-
-
-def fetch_games():
-    """按优先级尝试数据源，返回 (games, 源名)；全失败返回 (None, None)"""
-    errors = []
-    # 1) NBA 官方
+def fetch_full_schedule():
+    """拉取整季赛程；成功返回 JSON，失败返回 None"""
+    url = FULL_SCHEDULE.format(year=season_year())
     try:
-        r = requests.get(NBA_TODAY, headers=HEADERS, timeout=15)
+        r = requests.get(url, headers=HEADERS, timeout=20)
         if r.status_code == 200 and '<html' not in r.text[:100].lower():
-            return parse_nba_official(r.json()), 'NBA官方'
-        errors.append(f'NBA官方 HTTP {r.status_code}')
+            return r.json()
+        print(f"[诊断] data.nba.com HTTP {r.status_code}, 前80字: {r.text[:80]}")
     except Exception as e:
-        errors.append(f'NBA官方 {e}')
-    # 2) ESPN 备用
-    try:
-        r = requests.get(ESPN_SB, headers=HEADERS, timeout=15)
-        if r.status_code == 200 and '<html' not in r.text[:100].lower():
-            return parse_espn(r.json()), 'ESPN'
-        errors.append(f'ESPN HTTP {r.status_code}')
-    except Exception as e:
-        errors.append(f'ESPN {e}')
+        print(f"[诊断] data.nba.com 请求失败: {e}")
+    return None
 
-    print(f"[诊断] 所有数据源失败: {'; '.join(errors)}")
-    return None, None
+
+def extract_today_games(data, target_date):
+    """从整季赛程里筛出北京时间 target_date 当天的比赛"""
+    games = []
+    # 结构: data['lscd'] = [{'mscd': {'g': [场次...]}}, ...]（按月分组）
+    for month in data.get('lscd', []):
+        for g in month.get('mscd', {}).get('g', []):
+            utc = g.get('gdtutc', '')
+            tm = g.get('utctm', '')  # 形如 "23:00"
+            if not utc:
+                continue
+            # gdtutc 是 UTC 日期（YYYY-MM-DD），utctm 是 UTC 时刻
+            utc_full = f"{utc}T{tm}:00Z" if tm else f"{utc}T00:00:00Z"
+            game_date_cst, start_cst = utc_to_cst_parts(utc_full)
+            if game_date_cst != target_date:
+                continue
+
+            v = g.get('v', {})  # visitor 客队
+            h = g.get('h', {})  # home 主队
+            away_name = f"{v.get('tc','')} {v.get('tn','')}".strip()
+            home_name = f"{h.get('tc','')} {h.get('tn','')}".strip()
+            # stt: 状态文本；比分在 v['s'] / h['s']（未开赛为空字符串）
+            stt = g.get('stt', '')
+            v_score = v.get('s', '').strip()
+            h_score = h.get('s', '').strip()
+
+            # 判断状态
+            if 'Final' in stt:
+                state = 'post'
+            elif v_score and h_score and any(ch.isdigit() for ch in stt):
+                state = 'in'
+            else:
+                state = 'pre'
+
+            games.append({
+                'home': home_name, 'away': away_name,
+                'home_score': int(h_score) if h_score.isdigit() else 0,
+                'away_score': int(v_score) if v_score.isdigit() else 0,
+                'state': state, 'status_txt': stt, 'start_cst': start_cst,
+            })
+    return games
 
 
 def main():
     print(f'🔖 脚本版本: {SCRIPT_VERSION}')
     cst_date = datetime.now(CST).strftime('%Y-%m-%d')
-    games, source = fetch_games()
 
-    if games is None:
+    data = fetch_full_schedule()
+    if data is None:
         print(f"### 🏀 NBA 赛程\n\n⚠️ 数据源暂时不可用，稍后再试。")
         return
 
+    games = extract_today_games(data, cst_date)
     if not games:
         print(f"### 🏀 NBA 赛程\n\n**{cst_date}** 今日暂无比赛（可能处于休赛期）。")
         return
@@ -157,7 +155,7 @@ def main():
                          f"| {g['home_score']}-{g['away_score']} | 🏆 **{winner}** |")
         sections.append('\n'.join(block))
 
-    sections.append(f'\n> 数据源: {source}')
+    sections.append('\n> 数据源: NBA官方赛程')
     print('\n'.join(sections))
 
 
