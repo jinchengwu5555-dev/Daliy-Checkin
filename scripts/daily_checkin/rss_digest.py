@@ -55,19 +55,71 @@ def clean(text: str) -> str:
 CJK_RE = re.compile(r'[\u4e00-\u9fff]')
 
 
+# 翻译失败诊断计数（仅打印一次，避免刷屏）
+_translate_diag_printed = False
+
+
+def _try_google(text: str) -> str | None:
+    """Google 免费翻译接口"""
+    r = requests.get(
+        'https://translate.googleapis.com/translate_a/single',
+        params={'client': 'gtx', 'sl': 'en', 'tl': 'zh-CN', 'dt': 't', 'q': text},
+        headers=HEADERS, timeout=8,
+    )
+    if r.status_code != 200 or '<html' in r.text[:100].lower():
+        raise RuntimeError(f'google HTTP {r.status_code}')
+    data = r.json()
+    zh = ''.join(seg[0] for seg in data[0] if seg and seg[0])
+    return zh.strip() or None
+
+
+def _try_google_clients5(text: str) -> str | None:
+    """Google clients5 备用端点（返回结构不同）"""
+    r = requests.get(
+        'https://clients5.google.com/translate_a/t',
+        params={'client': 'dict-chrome-ex', 'sl': 'en', 'tl': 'zh-CN', 'q': text},
+        headers=HEADERS, timeout=8,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f'clients5 HTTP {r.status_code}')
+    data = r.json()
+    # 结构可能是 [["译文","en"]] 或 {"sentences":[...]}
+    if isinstance(data, list) and data and isinstance(data[0], list):
+        return str(data[0][0]).strip() or None
+    if isinstance(data, dict) and data.get('sentences'):
+        return ''.join(s.get('trans', '') for s in data['sentences']).strip() or None
+    return None
+
+
+def _try_mymemory(text: str) -> str | None:
+    """MyMemory 免费翻译 API（老牌，无需密钥）"""
+    r = requests.get(
+        'https://api.mymemory.translated.net/get',
+        params={'q': text, 'langpair': 'en|zh-CN'},
+        headers=HEADERS, timeout=8,
+    )
+    if r.status_code != 200:
+        raise RuntimeError(f'mymemory HTTP {r.status_code}')
+    zh = r.json().get('responseData', {}).get('translatedText', '')
+    return zh.strip() or None
+
+
 def translate_to_zh(text: str) -> str | None:
-    """英译中，失败返回 None（Google 免费接口，无需密钥）"""
-    try:
-        r = requests.get(
-            'https://translate.googleapis.com/translate_a/single',
-            params={'client': 'gtx', 'sl': 'en', 'tl': 'zh-CN', 'dt': 't', 'q': text},
-            timeout=8,
-        )
-        data = r.json()
-        zh = ''.join(seg[0] for seg in data[0] if seg and seg[0])
-        return zh.strip() or None
-    except Exception:
-        return None
+    """英译中：多接口自动容错，全部失败返回 None"""
+    global _translate_diag_printed
+    errors = []
+    for fn in (_try_google, _try_google_clients5, _try_mymemory):
+        try:
+            zh = fn(text)
+            if zh:
+                return zh
+        except Exception as e:
+            errors.append(str(e))
+    # 全挂时，仅第一次打印诊断，方便排查是哪个环节的问题
+    if not _translate_diag_printed:
+        print(f"⚙️ 翻译接口全部失败，诊断: {'; '.join(errors)}")
+        _translate_diag_printed = True
+    return None
 
 
 def fetch_feed(url: str, max_items: int) -> list[dict]:
